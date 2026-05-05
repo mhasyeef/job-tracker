@@ -3,6 +3,22 @@ import { supabase } from '../lib/supabase'
 import type { Application, ApplicationInput, Status } from '../types'
 import AppModal from '../components/AppModal'
 
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        oauth2: {
+          initTokenClient: (config: {
+            client_id: string
+            scope: string
+            callback: (resp: { access_token?: string; error?: string }) => void
+          }) => { requestAccessToken: () => void }
+        }
+      }
+    }
+  }
+}
+
 const COLORS = [
   ['#E6F1FB','#0C447C'], ['#EAF3DE','#27500A'], ['#FAEEDA','#633806'],
   ['#FBEAF0','#72243E'], ['#EEEDFE','#3C3489'], ['#E1F5EE','#085041'],
@@ -42,6 +58,8 @@ export default function TrackerPage() {
   const [sortAsc, setSortAsc] = useState(false)
   const [page, setPage] = useState(1)
   const [modal, setModal] = useState<'add' | Application | null>(null)
+  const [gmailState, setGmailState] = useState<'idle' | 'scanning' | 'importing'>('idle')
+  const [gmailMsg, setGmailMsg] = useState('')
 
   const fetchApps = useCallback(async () => {
     setLoading(true)
@@ -67,6 +85,94 @@ export default function TrackerPage() {
 
   return () => { supabase.removeChannel(channel) }
 }, [fetchApps])
+
+  function loadGsiScript(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (window.google?.accounts) { resolve(); return }
+      const existing = document.getElementById('gsi-script') as HTMLScriptElement | null
+      if (existing) {
+        existing.addEventListener('load', () => resolve())
+        existing.addEventListener('error', () => reject(new Error('Failed to load Google Sign-In')))
+        return
+      }
+      const script = document.createElement('script')
+      script.id = 'gsi-script'
+      script.src = 'https://accounts.google.com/gsi/client'
+      script.async = true
+      script.onload = () => resolve()
+      script.onerror = () => reject(new Error('Failed to load Google Sign-In'))
+      document.head.appendChild(script)
+    })
+  }
+
+  function requestGoogleToken(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      window.google!.accounts.oauth2.initTokenClient({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID as string,
+        scope: 'https://www.googleapis.com/auth/gmail.readonly',
+        callback: (resp) => {
+          if (resp.error || !resp.access_token) {
+            reject(new Error(resp.error ?? 'OAuth cancelled'))
+          } else {
+            resolve(resp.access_token)
+          }
+        },
+      }).requestAccessToken()
+    })
+  }
+
+  async function handleScanGmail() {
+    setGmailState('scanning')
+    setGmailMsg('')
+    try {
+      await loadGsiScript()
+      const accessToken = await requestGoogleToken()
+
+      const res = await fetch('/api/gmail-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken }),
+      })
+      const json = await res.json() as { applications?: ApplicationInput[]; error?: string }
+      if (json.error) throw new Error(json.error)
+
+      const incoming = json.applications ?? []
+      if (incoming.length === 0) {
+        setGmailMsg('No job emails found in label:Job-Applications')
+        setGmailState('idle')
+        return
+      }
+
+      setGmailState('importing')
+      const existingKeys = new Set(
+        apps.map(a => `${a.company.toLowerCase()}|${a.role.toLowerCase()}`)
+      )
+      const toInsert = incoming.filter(
+        a => !existingKeys.has(`${a.company.toLowerCase()}|${a.role.toLowerCase()}`)
+      )
+
+      if (toInsert.length > 0) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase.from('applications').insert(
+            toInsert.map(app => ({ ...app, user_id: user.id }))
+          )
+          await fetchApps()
+        }
+      }
+
+      const skipped = incoming.length - toInsert.length
+      setGmailMsg(
+        toInsert.length > 0
+          ? `Imported ${toInsert.length} application${toInsert.length !== 1 ? 's' : ''}${skipped > 0 ? `, ${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped` : ''}`
+          : `${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped — nothing new`
+      )
+      setTimeout(() => setGmailMsg(''), 6000)
+    } catch (err) {
+      setGmailMsg(err instanceof Error ? err.message : 'Scan failed')
+    }
+    setGmailState('idle')
+  }
 
   async function handleSave(data: ApplicationInput) {
     const { data: { user } } = await supabase.auth.getUser()
@@ -127,11 +233,18 @@ export default function TrackerPage() {
           <div>
             <h1 style={{ fontSize: '20px', fontWeight: 600, letterSpacing: '-0.3px' }}>Applications</h1>
             <p style={{ fontSize: '12px', color: 'var(--text2)', marginTop: '2px' }}>
-              {loading ? 'Loading…' : `${apps.length} application${apps.length !== 1 ? 's' : ''} tracked`}
+              {gmailMsg || (loading ? 'Loading…' : `${apps.length} application${apps.length !== 1 ? 's' : ''} tracked`)}
             </p>
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button onClick={() => setModal('add')} style={btnStyle('primary')}>+ Add</button>
+            <button
+              onClick={handleScanGmail}
+              disabled={gmailState !== 'idle'}
+              style={btnStyle()}
+            >
+              {gmailState === 'scanning' ? 'Scanning…' : gmailState === 'importing' ? 'Importing…' : 'Scan Gmail'}
+            </button>
             <button onClick={handleSignOut} style={btnStyle()}>Sign out</button>
           </div>
         </div>
