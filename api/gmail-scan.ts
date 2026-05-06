@@ -1,5 +1,5 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
-import Anthropic from '@anthropic-ai/sdk'
+/* eslint-disable @typescript-eslint/no-require-imports */
+const Anthropic = require('@anthropic-ai/sdk')
 
 const GMAIL_QUERY = 'label:Job-Applications newer_than:7d'
 
@@ -31,7 +31,7 @@ async function fetchEmailMeta(accessToken: string): Promise<EmailMeta[]> {
 
   const results: EmailMeta[] = []
   await Promise.all(
-    messages.slice(0, 30).map(async ({ id }) => {
+    messages.slice(0, 30).map(async ({ id }: { id: string }) => {
       const res = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}` +
           `?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
@@ -40,7 +40,7 @@ async function fetchEmailMeta(accessToken: string): Promise<EmailMeta[]> {
       if (!res.ok) return
       const msg = await res.json()
       const headers: { name: string; value: string }[] = msg.payload?.headers ?? []
-      const get = (n: string) => headers.find(h => h.name === n)?.value ?? ''
+      const get = (n: string) => headers.find((h: { name: string; value: string }) => h.name === n)?.value ?? ''
       results.push({
         subject: get('Subject'),
         from: get('From'),
@@ -65,7 +65,8 @@ If multiple emails cover the same company+role, keep only the highest-status one
 async function parseWithClaude(emails: EmailMeta[]): Promise<ParsedApp[]> {
   if (emails.length === 0) return []
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+  const AnthropicClass = Anthropic.default ?? Anthropic
+  const client = new AnthropicClass({ apiKey: process.env.ANTHROPIC_API_KEY })
 
   const content = emails
     .map(
@@ -105,7 +106,8 @@ ${content}`,
   }
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+module.exports = async function handler(req: any, res: any) {
   console.log('ANTHROPIC_API_KEY exists:', !!process.env.ANTHROPIC_API_KEY)
   console.log('KEY value:', process.env.ANTHROPIC_API_KEY?.slice(0, 10))
   res.setHeader('Access-Control-Allow-Origin', '*')
