@@ -1,4 +1,9 @@
 {
   "buildCommand": "vite build",
-  "outputDirectory": "dist"
+  "outputDirectory": "dist",
+  "functions": {
+    "api/gmail-scan.ts": {
+      "runtime": "nodejs20.x"
+    }
+  }
 }
