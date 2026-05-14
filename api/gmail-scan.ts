@@ -1,13 +1,14 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 const Anthropic = require('@anthropic-ai/sdk')
 
-const GMAIL_QUERY = 'label:Job-Applications newer_than:7d'
+const GMAIL_QUERY =
+  'subject:("thank you for applying" OR "application received" OR "we received your application" OR "your application" OR "application for" OR "thanks for applying" OR "application submitted" OR "you applied") newer_than:7d'
 
 type EmailMeta = {
   subject: string
   from: string
   date: string
-  snippet: string
+  body: string
 }
 
 type ParsedApp = {
@@ -17,6 +18,32 @@ type ParsedApp = {
   date: string
   source: string
   notes: string
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractBodyText(payload: any): string {
+  if (!payload) return ''
+  if (payload.body?.data) return Buffer.from(payload.body.data, 'base64url').toString('utf-8')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const parts: any[] = payload.parts ?? []
+  const plain = parts.find((p: { mimeType: string }) => p.mimeType === 'text/plain')
+  if (plain?.body?.data) return Buffer.from(plain.body.data, 'base64url').toString('utf-8')
+  const html = parts.find((p: { mimeType: string }) => p.mimeType === 'text/html')
+  if (html?.body?.data) return Buffer.from(html.body.data, 'base64url').toString('utf-8')
+  for (const part of parts) {
+    const nested = extractBodyText(part)
+    if (nested) return nested
+  }
+  return ''
+}
+
+function trimEmailBody(raw: string): string {
+  let text = raw.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/gi, ' ')
+  text = text.replace(/\s+/g, ' ').trim()
+  text = text.replace(/On .+wrote:[\s\S]*/i, '')
+  text = text.replace(/--\s[\s\S]*$/, '')
+  text = text.replace(/\b(Best regards|Kind regards|Regards|Sincerely|Cheers|Sent from my)\b[\s\S]*/i, '')
+  return text.trim().split(/\s+/).slice(0, 500).join(' ')
 }
 
 async function fetchEmailMeta(accessToken: string): Promise<EmailMeta[]> {
@@ -33,8 +60,7 @@ async function fetchEmailMeta(accessToken: string): Promise<EmailMeta[]> {
   await Promise.all(
     messages.slice(0, 30).map(async ({ id }: { id: string }) => {
       const res = await fetch(
-        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}` +
-          `?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       )
       if (!res.ok) return
@@ -45,7 +71,7 @@ async function fetchEmailMeta(accessToken: string): Promise<EmailMeta[]> {
         subject: get('Subject'),
         from: get('From'),
         date: get('Date'),
-        snippet: msg.snippet ?? '',
+        body: trimEmailBody(extractBodyText(msg.payload)),
       })
     })
   )
@@ -60,7 +86,9 @@ Status values:
 - "offer": job offer or "pleased to offer"
 - "rejected": "not moving forward", "other candidates", position filled
 
-If multiple emails cover the same company+role, keep only the highest-status one.`
+If multiple emails cover the same company+role, keep only the highest-status one.
+
+If an email is not clearly a job application confirmation or recruitment-related email, omit it from the output array entirely. Do not attempt to parse non-job-application emails.`
 
 async function parseWithClaude(emails: EmailMeta[]): Promise<ParsedApp[]> {
   if (emails.length === 0) return []
@@ -71,7 +99,7 @@ async function parseWithClaude(emails: EmailMeta[]): Promise<ParsedApp[]> {
   const content = emails
     .map(
       (e, i) =>
-        `--- Email ${i + 1} ---\nSubject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}\nSnippet: ${e.snippet}`
+        `--- Email ${i + 1} ---\nSubject: ${e.subject}\nFrom: ${e.from}\nDate: ${e.date}\nBody: ${e.body}`
     )
     .join('\n\n')
 
@@ -98,11 +126,12 @@ ${content}`,
   })
 
   const text = msg.content[0].type === 'text' ? msg.content[0].text : '[]'
+  const isValid = (a: ParsedApp) => !!(a?.company && a?.role)
   try {
-    return JSON.parse(text) as ParsedApp[]
+    return (JSON.parse(text) as ParsedApp[]).filter(isValid)
   } catch {
     const m = text.match(/\[[\s\S]*\]/)
-    return m ? (JSON.parse(m[0]) as ParsedApp[]) : []
+    return m ? (JSON.parse(m[0]) as ParsedApp[]).filter(isValid) : []
   }
 }
 
