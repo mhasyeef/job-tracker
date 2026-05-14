@@ -2,7 +2,7 @@
 const Anthropic = require('@anthropic-ai/sdk')
 
 const GMAIL_QUERY =
-  'subject:("thank you for applying" OR "application received" OR "we received your application" OR "your application" OR "application for" OR "thanks for applying" OR "application submitted" OR "you applied" OR "update on your application" OR "your application status" OR "regarding your application" OR "application update" OR "we have reviewed your application" OR "following up on your application") newer_than:7d'
+  'subject:("thank you for applying" OR "application received" OR "we received your application" OR "your application" OR "application for" OR "thanks for applying" OR "application submitted" OR "you applied" OR "update on your application" OR "your application status" OR "regarding your application" OR "application update" OR "we have reviewed your application" OR "following up on your application" OR "your application at" OR "your application for") newer_than:7d'
 
 type EmailMeta = {
   subject: string
