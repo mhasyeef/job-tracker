@@ -2,7 +2,7 @@
 const Anthropic = require('@anthropic-ai/sdk')
 
 const GMAIL_QUERY =
-  'subject:("thank you for applying" OR "application received" OR "we received your application" OR "your application" OR "application for" OR "thanks for applying" OR "application submitted" OR "you applied" OR "update on your application" OR "your application status" OR "regarding your application" OR "application update" OR "we have reviewed your application" OR "following up on your application" OR "your application at" OR "your application for") newer_than:7d'
+  'subject:("thank you for applying" OR "application received" OR "we received your application" OR "your application" OR "application for" OR "thanks for applying" OR "application submitted" OR "you applied" OR "update on your application" OR "your application at" OR "an update on your application" OR "application update" OR "important info about your application" OR "your application for our") newer_than:7d'
 
 type EmailMeta = {
   subject: string
@@ -84,7 +84,7 @@ Status values:
 - "applied": application submitted or confirmation received
 - "in_progress": interview, phone screen, assessment, or "next steps"
 - "offer": job offer or "pleased to offer"
-- "rejected": "not moving forward", "other candidates", position filled
+- "rejected": "not moving forward", "other candidates", position filled, "decided not to move forward", "will not be moving forward", "decided not to proceed", "not moving forward with your application", "move forward with other candidates", "going in a direction that better fits", "not be moving forward", "not proceed with the next steps"
 
 If multiple emails cover the same company+role, keep only the highest-status one.
 
