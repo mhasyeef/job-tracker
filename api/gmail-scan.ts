@@ -2,7 +2,7 @@
 const Anthropic = require('@anthropic-ai/sdk')
 
 const GMAIL_QUERY =
-  'subject:("thank you for applying" OR "application received" OR "we received your application" OR "your application" OR "application for" OR "thanks for applying" OR "application submitted" OR "you applied" OR "update on your application" OR "your application at" OR "an update on your application" OR "application update" OR "important info about your application" OR "your application for our") newer_than:7d'
+  'subject:("thank you for applying" OR "application received" OR "we received your application" OR "your application" OR "application for" OR "thanks for applying" OR "application submitted" OR "you applied" OR "update on your application" OR "your application at" OR "an update on your application" OR "application update" OR "important info about your application" OR "your application for our" OR "invite you for an interview" OR "invitation to interview" OR "interview invitation" OR "we would like to meet" OR "schedule an interview" OR "interview for the" OR "like to invite you") newer_than:7d'
 
 type EmailMeta = {
   subject: string
@@ -55,10 +55,11 @@ async function fetchEmailMeta(accessToken: string): Promise<EmailMeta[]> {
   if (!listRes.ok) throw new Error(`Gmail list failed (${listRes.status}): ${await listRes.text()}`)
 
   const { messages = [] } = (await listRes.json()) as { messages?: { id: string }[] }
+  const capped = messages.slice(0, 50)
 
   const results: EmailMeta[] = []
   await Promise.all(
-    messages.slice(0, 30).map(async ({ id }: { id: string }) => {
+    capped.map(async ({ id }: { id: string }) => {
       const res = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
